@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP Si5351A
+D MSOP10, I2C, Clock Generator
+K Silabs Clock Generator
+F https://www.silabs.com/documents/public/data-sheets/Si5351-B.pdf
+$ENDCMP
+#
+#End Doc Library
