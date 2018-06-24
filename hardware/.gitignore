@@ -24,3 +24,8 @@ _autosave-*
 # Exported BOM files
 *.xml
 *.csv
+
+# Files created by LTspice
+filters/*.log
+filters/*.net
+filters/*.raw
