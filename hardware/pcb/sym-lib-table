@@ -1,0 +1,3 @@
+(sym_lib_table
+  (lib (name si5351a)(type Legacy)(uri ${KIPRJMOD}/libraries/si5351a.lib)(options "")(descr "Si5351 Oscillator"))
+)
