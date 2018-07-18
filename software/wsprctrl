@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+#
+# Copyright 2018 Alexander Fasching
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+#
+
+import sys
+import time
+import argparse
+import struct
+
+import usb
+
+CTRL_GET_REGISTER = 0
+CTRL_SET_REGISTER = 1
+
+STATUS_OK = 0
+STATUS_ERROR = 1
+
+REG_LED = 0
+
+
+
+class BeaconException(Exception):
+    pass
+
+
+def get_devices():
+    devices = []
+    for dev in usb.core.find(idVendor=0x16c0, idProduct=0x05dc, find_all=True):
+        sn = usb.util.get_string(dev, dev.iSerialNumber)
+        if sn == 'oe5tkm.net:wspr-beacon':
+            devices.append(dev)
+
+    return devices
+
+
+class Beacon(object):
+    def __init__(self, dev : usb.Device):
+        self.dev = dev
+
+    def get_register(self, addr):
+        buf = self.dev.ctrl_transfer(0xC0, CTRL_GET_REGISTER, 0, addr, 4)
+        if len(buf) != 4:
+            raise BeaconException('Received response with wrong size')
+
+        value, status = struct.unpack('HH', buf)
+        if status != STATUS_OK:
+            raise BeaconException('Received response with error code %d' % status)
+
+        return value
+
+
+    def set_register(self, addr, value):
+        buf = self.dev.ctrl_transfer(0xC0, CTRL_SET_REGISTER, value, addr, 4)
+        if len(buf) != 4:
+            raise BeaconException('Received response with wrong size')
+
+        value, status = struct.unpack('HH', buf)
+        if status != STATUS_OK:
+            raise BeaconException('Received response with error code %d' % status)
+
+        return value
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--list', '-l', action='store_true',
+                        help='Show available devices')
+
+    args = parser.parse_args()
+
+    devices = get_devices()
+    if len(devices) == 0:
+        print('Error: no WSPR devices found', file=sys.stderr)
+        return 1
+
+    if args.list:
+        for i, dev in enumerate(devices):
+            name = usb.util.get_string(dev, dev.iProduct)
+            print('%d: %s' % (i, name))
+        return
+
+    dev = devices[0]
+    dev.set_configuration()
+
+    beacon = Beacon(dev)
+
+    count = 0
+    while True:
+        value = beacon.get_register(REG_LED)
+        #time.sleep(0.01)
+        beacon.set_register(REG_LED, not value)
+        count += 1
+        print(count)
+
+
+if __name__ == '__main__':
+    sys.exit(main() or 0)
