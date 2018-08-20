@@ -20,6 +20,7 @@ import sys
 import time
 import argparse
 import struct
+import contextlib
 
 import usb
 
@@ -32,19 +33,17 @@ STATUS_ERROR = 1
 REG_LED = 0
 
 
-
 class BeaconException(Exception):
     pass
 
 
 def get_devices():
-    devices = []
-    for dev in usb.core.find(idVendor=0x16c0, idProduct=0x05dc, find_all=True):
-        sn = usb.util.get_string(dev, dev.iSerialNumber)
-        if sn == 'oe5tkm.net:wspr-beacon':
-            devices.append(dev)
-
-    return devices
+    device_filter = dict(
+        idVendor=0x16c0,
+        idProduct=0x05dc,
+        serial_number='oe5tkm.net:wspr-beacon'
+    )
+    return list(usb.core.find(**device_filter, find_all=True))
 
 
 class Beacon(object):
@@ -78,7 +77,11 @@ class Beacon(object):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--list', '-l', action='store_true',
-                        help='Show available devices')
+                        help='show available devices')
+    parser.add_argument('--blink', '-b', action='store_true',
+                        help='blink LED')
+    parser.add_argument('--device', '-d', type=int, default=0,
+                        help='device index')
 
     args = parser.parse_args()
 
@@ -93,19 +96,20 @@ def main():
             print('%d: %s' % (i, name))
         return
 
-    dev = devices[0]
-    dev.set_configuration()
+    if args.device < 0 or args.device >= len(devices):
+        print('Error: invalid device index', file=sys.stderr)
+        return 1
 
+    dev = devices[args.device]
+    dev.set_configuration()
     beacon = Beacon(dev)
 
-    count = 0
-    while True:
-        value = beacon.get_register(REG_LED)
-        #time.sleep(0.01)
-        beacon.set_register(REG_LED, not value)
-        count += 1
-        print(count)
-
+    if args.blink:
+        with contextlib.suppress(KeyboardInterrupt):
+            while True:
+                value = beacon.get_register(REG_LED)
+                beacon.set_register(REG_LED, not value)
+                time.sleep(0.1)
 
 if __name__ == '__main__':
     sys.exit(main() or 0)

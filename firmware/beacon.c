@@ -81,6 +81,7 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
         switch (address) {
             case REG_LED:
                 led_set(value);
+                response.value = !!value;
                 response.status = STATUS_OK;
                 break;
         }
@@ -101,7 +102,7 @@ int main(int argc, char **argv) {
     /* Initialize the USB driver and force enumeration. */
     usbInit();
     usbDeviceDisconnect();
-    _delay_ms(500);
+    _delay_ms(250);
     usbDeviceConnect();
 
     sei();
