@@ -32,16 +32,15 @@
 #define CTRL_SET_REGISTER 1
 
 #define REG_LED       0
+#define REG_FREQ_CORR 1
 
 /* The frequency is written to the output module when the most significant
  * word is written.
  */
 #define REG_CLK0_FREQ_0          8
 #define REG_CLK0_FREQ_1          9
-#define REG_CLK0_FREQ_2         10
-#define REG_CLK0_FREQ_3         11
-#define REG_CLK0_ENABLE         12
-#define REG_CLK0_DRIVE          13
+#define REG_CLK0_ENABLE         10
+#define REG_CLK0_DRIVE          11
 
 #define STATUS_OK 0
 #define STATUS_ERROR 1
@@ -63,12 +62,14 @@ typedef struct {
 
 
 typedef struct {
-    uint64_t frequency;
+    uint32_t frequency;
     uint8_t enabled;
     uint8_t drive;
 } clk_output_t;
 
 clk_output_t clk_outputs[3] = {0};
+
+int16_t freq_corr = 0;
 
 
 usbMsgLen_t usbFunctionSetup(uchar data[8])
@@ -98,16 +99,6 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 response.status = STATUS_OK;
                 break;
 
-            case REG_CLK0_FREQ_2:
-                response.value = (clk_outputs[0].frequency >> 32) & 0xFFFF;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_FREQ_3:
-                response.value = (clk_outputs[0].frequency >> 48) & 0xFFFF;
-                response.status = STATUS_OK;
-                break;
-
             case REG_CLK0_ENABLE:
                 response.value = clk_outputs[0].enabled;
                 response.status = STATUS_OK;
@@ -117,6 +108,12 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 response.value = clk_outputs[0].drive;
                 response.status = STATUS_OK;
                 break;
+
+            case REG_FREQ_CORR:
+                response.value = freq_corr;
+                response.status = STATUS_OK;
+                break;
+
         }
 
         usbMsgPtr = (void *) &response;
@@ -137,32 +134,21 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 break;
 
             case REG_CLK0_FREQ_0:
-                clk_outputs[0].frequency &= 0xFFFFFFFFFFFF0000;
-                clk_outputs[0].frequency |= ((uint64_t)value << 0UL);
+                clk_outputs[0].frequency &= 0xFFFF0000;
+                clk_outputs[0].frequency |= ((uint32_t)value << 0UL);
                 response.value = value;
                 response.status = STATUS_OK;
                 break;
 
             case REG_CLK0_FREQ_1:
-                clk_outputs[0].frequency &= 0xFFFFFFFF0000FFFF;
-                clk_outputs[0].frequency |= ((uint64_t)value << 16UL);
-                response.value = value;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_FREQ_2:
-                clk_outputs[0].frequency &= 0xFFFF0000FFFFFFFF;
-                clk_outputs[0].frequency |= ((uint64_t)value << 32UL);
-                response.value = value;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_FREQ_3:
-                clk_outputs[0].frequency &= 0x0000FFFFFFFFFFFF;
-                clk_outputs[0].frequency |= ((uint64_t)value << 48UL);
+                clk_outputs[0].frequency &= 0x0000FFFF;
+                clk_outputs[0].frequency |= ((uint32_t)value << 16UL);
                 si5351_set_freq(clk_outputs[0].frequency, SI5351_CLK0);
                 response.value = value;
                 response.status = STATUS_OK;
+                sprintf(strbuf, "Setting frequency to %ld Hz\n", clk_outputs[0].frequency);
+                uart_puts(strbuf);
+
                 break;
 
             case REG_CLK0_ENABLE:
@@ -170,6 +156,13 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 si5351_output_enable(SI5351_CLK0, !!value);
                 response.value = !!value;
                 response.status = STATUS_OK;
+
+                if (value)
+                    sprintf(strbuf, "Output enabled\n");
+                else
+                    sprintf(strbuf, "Output disabled\n");
+                uart_puts(strbuf);
+
                 break;
 
             case REG_CLK0_DRIVE:
@@ -179,6 +172,20 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 si5351_drive_strength(SI5351_CLK0, value);
                 response.value = value;
                 response.status = STATUS_OK;
+
+                uint8_t strength = (value + 1) * 2;
+                sprintf(strbuf, "Setting drive strength to %d mA\n", strength);
+                uart_puts(strbuf);
+
+                break;
+
+            case REG_FREQ_CORR:
+                freq_corr = value;
+                si5351_set_correction(freq_corr);
+                response.value = freq_corr;
+                response.status = STATUS_OK;
+                sprintf(strbuf, "Setting frequency correction to %d ppm\n", freq_corr / 10);
+                uart_puts(strbuf);
                 break;
         }
 

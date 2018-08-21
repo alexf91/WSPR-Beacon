@@ -17,6 +17,7 @@
 #
 
 import sys
+import ctypes
 import time
 import argparse
 import struct
@@ -24,7 +25,6 @@ import contextlib
 import datetime as dt
 import subprocess
 
-import sh
 import usb
 
 CTRL_GET_REGISTER = 0
@@ -34,14 +34,13 @@ STATUS_OK = 0
 STATUS_ERROR = 1
 
 REG_LED = 0
+REG_FREQ_CORR = 1
 
 # Registers for CLK0 output
 REG_CLK0_FREQ_0 =  8
 REG_CLK0_FREQ_1 =  9
-REG_CLK0_FREQ_2 = 10
-REG_CLK0_FREQ_3 = 11
-REG_CLK0_ENABLE = 12
-REG_CLK0_DRIVE  = 13
+REG_CLK0_ENABLE = 10
+REG_CLK0_DRIVE  = 11
 
 
 class BeaconException(Exception):
@@ -91,22 +90,27 @@ class Beacon(object):
     def set_frequency(self, freq):
         self.set_register(REG_CLK0_FREQ_0, (freq >>  0) & 0xFFFF)
         self.set_register(REG_CLK0_FREQ_1, (freq >> 16) & 0xFFFF)
-        self.set_register(REG_CLK0_FREQ_2, (freq >> 32) & 0xFFFF)
-        self.set_register(REG_CLK0_FREQ_3, (freq >> 48) & 0xFFFF)
 
     def get_frequency(self):
         f0 = self.get_register(REG_CLK0_FREQ_0)
         f1 = self.get_register(REG_CLK0_FREQ_1)
-        f2 = self.get_register(REG_CLK0_FREQ_2)
-        f3 = self.get_register(REG_CLK0_FREQ_3)
 
-        return (f3 << 48) | (f2 << 32) | (f1 << 16) | f0
+        return (f1 << 16) | f0
 
     def set_drive_strength(self, drive_ma):
         """Set the drive strength in mA."""
         drive_index = drive_ma // 2 - 1
         self.set_register(REG_CLK0_DRIVE, drive_index)
 
+    def set_freq_corr(self, ppm):
+        """Set the frequency correction factor."""
+        value = ctypes.c_uint16(round(ppm * 10)).value
+        self.set_register(REG_FREQ_CORR, value)
+
+    def get_freq_corr(self):
+        """Get the frequency correction factor."""
+        value = self.get_register(REG_FREQ_CORR)
+        return ctypes.c_int16(value).value
 
 
 def main():
@@ -119,6 +123,12 @@ def main():
                         help='device index')
     parser.add_argument('--message', '-m', type=str, default=None,
                         help='message to transmit')
+    parser.add_argument('--test', '-t', action='store_true',
+                        help='transmit test tone')
+    parser.add_argument('--ppm', '-p', type=float, default=None,
+                        help='set frequency correction in PPM')
+    parser.add_argument('--frequency', '-f', type=int, default=None,
+                        help='transmit frequency')
 
     args = parser.parse_args()
 
@@ -141,6 +151,11 @@ def main():
     dev.set_configuration()
     beacon = Beacon(dev)
 
+
+    if args.ppm is not None:
+        beacon.set_freq_corr(args.ppm)
+
+
     if args.blink:
         with contextlib.suppress(KeyboardInterrupt):
             while True:
@@ -149,7 +164,11 @@ def main():
                 time.sleep(0.1)
 
 
-    if args.message:
+    elif args.message:
+        if args.frequency is None:
+            print('Frequency not set', file=sys.stderr)
+            return 1
+
         result = subprocess.run(['./wsprcode', args.message], stdout=subprocess.PIPE)
         output = result.stdout.split(b'\n')
         i = output.index(b'Channel symbols:')
@@ -171,7 +190,7 @@ def main():
                 stop = dt.datetime.now() + dt.timedelta(seconds=0.682667)
                 f = 1.4648 * sym
 
-                beacon.set_frequency(7040000 + round(f))
+                beacon.set_frequency(args.frequency + round(f))
 
                 diff = (stop - dt.datetime.now()).total_seconds()
                 time.sleep(diff)
@@ -180,6 +199,22 @@ def main():
             pass
         finally:
             beacon.set_enable(False)
+
+
+    elif args.test:
+        if args.frequency is None:
+            print('Frequency not set', file=sys.stderr)
+            return 1
+
+        beacon.set_drive_strength(2)
+        beacon.set_frequency(args.frequency)
+        beacon.set_enable(True)
+
+        with contextlib.suppress(KeyboardInterrupt):
+            while True:
+                time.sleep(0.1)
+
+        beacon.set_enable(False)
 
 
 if __name__ == '__main__':
