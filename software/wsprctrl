@@ -22,6 +22,7 @@ import argparse
 import struct
 import contextlib
 import datetime as dt
+import subprocess
 
 import sh
 import usb
@@ -141,43 +142,36 @@ def main():
                 time.sleep(0.1)
 
 
-
     if args.message:
-        output = sh.jt65code(args.message).split('\n')
-        i = output.index('Information-carrying channel symbols')
-        tones = [int(i) for i in ' '.join(output[i+1:]).split()]
+        result = subprocess.run(['./wsprcode', args.message], stdout=subprocess.PIPE)
+        output = result.stdout.split(b'\n')
+        i = output.index(b'Channel symbols:')
+        symbols = [int(x) for x in b' '.join(output[i+1:i+7]).split()]
 
-        synctones = [
-            1,0,0,1,1,0,0,0,1,1,1,1,1,1,0,1,0,1,0,0,0,1,0,1,1,0,0,1,0,0,
-            0,1,1,1,0,0,1,1,1,1,0,1,1,0,1,1,1,1,0,0,0,1,1,0,1,0,1,0,1,1,
-            0,0,1,1,0,1,0,1,0,1,0,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,1,
-            0,1,0,0,1,0,1,1,0,1,0,1,0,1,0,0,1,1,0,0,1,0,0,1,0,0,0,0,1,1,
-            1,1,1,1,1,1
-        ]
-
+        # Get the time when the transmission starts
         now = dt.datetime.now()
-        start = now.replace(minute=now.minute+1, second=0, microsecond=0)
+        minute = (now.minute + 2) if (now.minute % 2 == 0) else (now.minute + 1)
+        start = now.replace(minute=minute, second=1, microsecond=0)
 
+        # Wait until the transmission starts
         diff = (start - now).total_seconds()
         time.sleep(diff)
 
-        idx = 0
-        beacon.set_enable(True)
-        for sync in synctones:
-            stop = dt.datetime.now() + dt.timedelta(milliseconds=372)
+        try:
+            beacon.set_enable(True)
+            for sym in symbols:
+                stop = dt.datetime.now() + dt.timedelta(seconds=0.682667)
+                f = 1.4648 * sym
 
-            if sync:
-                f = 0
-            else:
-                f = 2.6917 * (tones[idx] + 2)
-                idx += 1
+                beacon.set_frequency(7040000 + round(f))
 
-            beacon.set_frequency(7089000 + round(f))
+                diff = (stop - dt.datetime.now()).total_seconds()
+                time.sleep(diff)
 
-            diff = (stop - dt.datetime.now()).total_seconds()
-            time.sleep(diff)
-
-        beacon.set_enable(False)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            beacon.set_enable(False)
 
 
 if __name__ == '__main__':
