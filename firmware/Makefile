@@ -10,7 +10,7 @@ SIZE = avr-size
 
 DEFINES = -DF_CPU=$(F_CPU)
 CFLAGS = $(DEFINES) -Os -std=gnu11 -mmcu=$(MCU) -Wall -I/usr/avr/include
-OBJECTS = beacon.o uart.o usbdrv.o usbdrvasm.o oddebug.o
+OBJECTS = beacon.o uart.o usbdrv.o usbdrvasm.o oddebug.o i2c_master.o si5351.o
 
 LDFLAGS = -mmcu=$(MCU)
 
