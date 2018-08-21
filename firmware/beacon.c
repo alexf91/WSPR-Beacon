@@ -191,6 +191,7 @@ int main(int argc, char **argv) {
     sei();
 
     si5351_init(SI5351_CRYSTAL_LOAD_8PF, SI5351_CLK_SRC_XTAL);
+    si5351_drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
 
     while (1) {
         usbPoll();
