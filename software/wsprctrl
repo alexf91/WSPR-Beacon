@@ -21,7 +21,9 @@ import time
 import argparse
 import struct
 import contextlib
+import datetime as dt
 
+import sh
 import usb
 
 CTRL_GET_REGISTER = 0
@@ -31,6 +33,13 @@ STATUS_OK = 0
 STATUS_ERROR = 1
 
 REG_LED = 0
+
+# Registers for CLK0 output
+REG_CLK0_FREQ_0 =  8
+REG_CLK0_FREQ_1 =  9
+REG_CLK0_FREQ_2 = 10
+REG_CLK0_FREQ_3 = 11
+REG_CLK0_ENABLE = 12
 
 
 class BeaconException(Exception):
@@ -73,6 +82,24 @@ class Beacon(object):
 
         return value
 
+    def set_enable(self, enable):
+        """Enable/disable the frequency output."""
+        return self.set_register(REG_CLK0_ENABLE, bool(enable))
+
+    def set_frequency(self, freq):
+        self.set_register(REG_CLK0_FREQ_0, (freq >>  0) & 0xFFFF)
+        self.set_register(REG_CLK0_FREQ_1, (freq >> 16) & 0xFFFF)
+        self.set_register(REG_CLK0_FREQ_2, (freq >> 32) & 0xFFFF)
+        self.set_register(REG_CLK0_FREQ_3, (freq >> 48) & 0xFFFF)
+
+    def get_frequency(self):
+        f0 = self.get_register(REG_CLK0_FREQ_0)
+        f1 = self.get_register(REG_CLK0_FREQ_1)
+        f2 = self.get_register(REG_CLK0_FREQ_2)
+        f3 = self.get_register(REG_CLK0_FREQ_3)
+
+        return (f3 << 48) | (f2 << 32) | (f1 << 16) | f0
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -82,6 +109,8 @@ def main():
                         help='blink LED')
     parser.add_argument('--device', '-d', type=int, default=0,
                         help='device index')
+    parser.add_argument('--message', '-m', type=str, default=None,
+                        help='message to transmit')
 
     args = parser.parse_args()
 
@@ -110,6 +139,46 @@ def main():
                 value = beacon.get_register(REG_LED)
                 beacon.set_register(REG_LED, not value)
                 time.sleep(0.1)
+
+
+
+    if args.message:
+        output = sh.jt65code(args.message).split('\n')
+        i = output.index('Information-carrying channel symbols')
+        tones = [int(i) for i in ' '.join(output[i+1:]).split()]
+
+        synctones = [
+            1,0,0,1,1,0,0,0,1,1,1,1,1,1,0,1,0,1,0,0,0,1,0,1,1,0,0,1,0,0,
+            0,1,1,1,0,0,1,1,1,1,0,1,1,0,1,1,1,1,0,0,0,1,1,0,1,0,1,0,1,1,
+            0,0,1,1,0,1,0,1,0,1,0,0,1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1,1,
+            0,1,0,0,1,0,1,1,0,1,0,1,0,1,0,0,1,1,0,0,1,0,0,1,0,0,0,0,1,1,
+            1,1,1,1,1,1
+        ]
+
+        now = dt.datetime.now()
+        start = now.replace(minute=now.minute+1, second=0, microsecond=0)
+
+        diff = (start - now).total_seconds()
+        time.sleep(diff)
+
+        idx = 0
+        beacon.set_enable(True)
+        for sync in synctones:
+            stop = dt.datetime.now() + dt.timedelta(milliseconds=372)
+
+            if sync:
+                f = 0
+            else:
+                f = 2.6917 * (tones[idx] + 2)
+                idx += 1
+
+            beacon.set_frequency(7089000 + round(f))
+
+            diff = (stop - dt.datetime.now()).total_seconds()
+            time.sleep(diff)
+
+        beacon.set_enable(False)
+
 
 if __name__ == '__main__':
     sys.exit(main() or 0)
