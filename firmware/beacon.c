@@ -41,6 +41,7 @@
 #define REG_CLK0_FREQ_2         10
 #define REG_CLK0_FREQ_3         11
 #define REG_CLK0_ENABLE         12
+#define REG_CLK0_DRIVE          13
 
 #define STATUS_OK 0
 #define STATUS_ERROR 1
@@ -64,6 +65,7 @@ typedef struct {
 typedef struct {
     uint64_t frequency;
     uint8_t enabled;
+    uint8_t drive;
 } clk_output_t;
 
 clk_output_t clk_outputs[3] = {0};
@@ -108,6 +110,11 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
 
             case REG_CLK0_ENABLE:
                 response.value = clk_outputs[0].enabled;
+                response.status = STATUS_OK;
+                break;
+
+            case REG_CLK0_DRIVE:
+                response.value = clk_outputs[0].drive;
                 response.status = STATUS_OK;
                 break;
         }
@@ -164,6 +171,15 @@ usbMsgLen_t usbFunctionSetup(uchar data[8])
                 response.value = !!value;
                 response.status = STATUS_OK;
                 break;
+
+            case REG_CLK0_DRIVE:
+                if (value > SI5351_DRIVE_8MA)
+                    break;
+                clk_outputs[0].drive = value;
+                si5351_drive_strength(SI5351_CLK0, value);
+                response.value = value;
+                response.status = STATUS_OK;
+                break;
         }
 
         usbMsgPtr = (void *) &response;
@@ -191,7 +207,7 @@ int main(int argc, char **argv) {
     sei();
 
     si5351_init(SI5351_CRYSTAL_LOAD_8PF, SI5351_CLK_SRC_XTAL);
-    si5351_drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
+    si5351_drive_strength(SI5351_CLK0, SI5351_DRIVE_2MA);
 
     while (1) {
         usbPoll();

@@ -41,6 +41,7 @@ REG_CLK0_FREQ_1 =  9
 REG_CLK0_FREQ_2 = 10
 REG_CLK0_FREQ_3 = 11
 REG_CLK0_ENABLE = 12
+REG_CLK0_DRIVE  = 13
 
 
 class BeaconException(Exception):
@@ -101,6 +102,12 @@ class Beacon(object):
 
         return (f3 << 48) | (f2 << 32) | (f1 << 16) | f0
 
+    def set_drive_strength(self, drive_ma):
+        """Set the drive strength in mA."""
+        drive_index = drive_ma // 2 - 1
+        self.set_register(REG_CLK0_DRIVE, drive_index)
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -158,6 +165,7 @@ def main():
         time.sleep(diff)
 
         try:
+            beacon.set_drive_strength(8)
             beacon.set_enable(True)
             for sym in symbols:
                 stop = dt.datetime.now() + dt.timedelta(seconds=0.682667)
