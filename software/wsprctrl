@@ -176,8 +176,10 @@ def main():
 
         # Get the time when the transmission starts
         now = dt.datetime.now()
-        minute = (now.minute + 2) if (now.minute % 2 == 0) else (now.minute + 1)
-        start = now.replace(minute=minute, second=1, microsecond=0)
+        mdelta = dt.timedelta(minutes=(2 if (now.minute % 2 == 0) else 1))
+        start = now.replace(second=1, microsecond=0) + mdelta
+
+        print('Starting transmission at %s' % start.strftime('%H:%M'))
 
         # Wait until the transmission starts
         diff = (start - now).total_seconds()
