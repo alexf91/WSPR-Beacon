@@ -22,7 +22,6 @@
 #include <util/delay.h>
 
 #include "uart.h"
-#include "config.h"
 #include "usbdrv.h"
 #include "i2c_master.h"
 #include "si5351.h"
