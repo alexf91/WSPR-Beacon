@@ -22,6 +22,8 @@ set(CMAKE_ASM_FLAGS ${CMAKE_C_FLAGS})
 
 add_executable(${PROJECT_NAME}
     beacon.c
+    wspr.c
+    wspr.h
 
     # Internal hardware
     hal/i2c_master.c
@@ -50,5 +52,10 @@ include_directories(${PROJECT_NAME} hal vusb)
 # Target for flashing
 add_custom_target(flash
     COMMAND avrdude -p ${MCU} -P usb -c avrispmkii -e -U flash:w:${PROJECT_NAME}.elf
+    DEPENDS ${PROJECT_NAME}
+)
+
+add_custom_target(size
+    COMMAND avr-size -C --mcu ${MCU} ${PROJECT_NAME}.elf
     DEPENDS ${PROJECT_NAME}
 )

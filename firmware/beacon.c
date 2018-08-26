@@ -25,182 +25,173 @@
 #include "usbdrv.h"
 #include "i2c_master.h"
 #include "si5351.h"
+#include "wspr.h"
 
 
-#define CTRL_GET_REGISTER 0
-#define CTRL_SET_REGISTER 1
+#define CLK_OUTPUTS 3
+#define CALL_LENGTH 6
 
-#define REG_LED       0
-#define REG_FREQ_CORR 1
 
-/* The frequency is written to the output module when the most significant
- * word is written.
- */
-#define REG_CLK0_FREQ_0          8
-#define REG_CLK0_FREQ_1          9
-#define REG_CLK0_ENABLE         10
-#define REG_CLK0_DRIVE          11
+/* USB requests */
+enum Request {
+    REQ_ENABLE_LED = 0,     /* Enable the LED */
+    REQ_DISABLE_LED,        /* Disable the LED */
+    REQ_SET_FREQ,           /* Set the frequency of an output */
+    REQ_SET_DRIVE,          /* Set drive strenght for an output */
+    REQ_SET_CALL,           /* Set the callsign */
+    REQ_SET_FREQ_CORR,      /* Set frequency correction value */
+    REQ_START_TONE,         /* Start continuous tone */
+    REQ_STOP_TONE,          /* Stop continuous tone */
+};
 
-#define STATUS_OK 0
-#define STATUS_ERROR 1
+/* Status codes */
+enum Status {
+    STATUS_OK = 0,
+    STATUS_GENERIC_ERROR,
+    STATUS_INVALID_REQUEST,
+    STATUS_INVALID_INDEX,
+    STATUS_INVALID_VALUE,
+};
 
 char strbuf[64];
 
 static inline void led_init(void) { DDRB |= (1<<PB5); }
 static inline void led_on(void) { PORTB |= (1<<PB5); }
 static inline void led_off(void) { PORTB &= ~(1<<PB5); }
-static inline void led_toggle(void) { PORTB ^= (1<<PB5); }
-static inline bool led_value(void) { return !!(PORTB & (1<<PB5)); }
-static inline void led_set(bool v) { v ? led_on() : led_off(); }
 
 
-typedef struct {
+/* Structure containing the internal state of the beacon. */
+struct BeaconConfig {
+    char callsign[CALL_LENGTH];     /* Space padded callsign */
+    int32_t lat;                    /* Latitude in 8.24 fixed point format */
+    int32_t lon;                    /* Longitude in 8.24 fixed point format */
+    int32_t freq_corr;              /* Frequency correction in parts per 10 million */
+
+    struct {
+        uint32_t frequency;         /* Tuning frequency of the transmitter */
+        uint8_t drive;              /* Drive strength of the transmitter (2-8 mA) */
+    } output[CLK_OUTPUTS];
+};
+struct BeaconConfig beacon_config;  /* Keep a version of the config in RAM. */
+
+
+/* Structure used as response to requests. */
+struct {
     uint16_t value;
     uint16_t status;
-} response_t;
+} response;
 
 
-typedef struct {
-    uint32_t frequency;
-    uint8_t enabled;
-    uint8_t drive;
-} clk_output_t;
-
-clk_output_t clk_outputs[3] = {0};
-
-int16_t freq_corr = 0;
-
-
-usbMsgLen_t usbFunctionSetup(uchar data[8])
-{
+usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     usbRequest_t *rq = (void *) &data[0];
-    static response_t response;
 
-    if (rq->bRequest == CTRL_GET_REGISTER) {
-        uint16_t address = rq->wIndex.word;
+    response.value = 0;
+    response.status = STATUS_INVALID_REQUEST;
 
-        response.value = 0;
-        response.status = STATUS_ERROR;
+    if (rq->bRequest == REQ_ENABLE_LED) {
+        led_on();
+        response.status = STATUS_OK;
 
-        switch (address) {
-            case REG_LED:
-                response.value = led_value();
-                response.status = STATUS_OK;
-                break;
+    } else if (rq->bRequest == REQ_DISABLE_LED) {
+        led_off();
+        response.status = STATUS_OK;
 
-            case REG_CLK0_FREQ_0:
-                response.value = (clk_outputs[0].frequency >> 0) & 0xFFFF;
-                response.status = STATUS_OK;
-                break;
+    } else if (rq->bRequest == REQ_SET_FREQ) {
+        uint16_t req_index = rq->wIndex.word;
+        uint16_t req_value = rq->wValue.word;
 
-            case REG_CLK0_FREQ_1:
-                response.value = (clk_outputs[0].frequency >> 16) & 0xFFFF;
-                response.status = STATUS_OK;
-                break;
+        uint8_t output = req_index >> 12;
+        uint32_t freq = (((uint32_t)req_index << 16) | req_value) & 0x0FFFFFFF;
 
-            case REG_CLK0_ENABLE:
-                response.value = clk_outputs[0].enabled;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_DRIVE:
-                response.value = clk_outputs[0].drive;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_FREQ_CORR:
-                response.value = freq_corr;
-                response.status = STATUS_OK;
-                break;
-
+        if (output >= CLK_OUTPUTS) {
+            response.status = STATUS_INVALID_INDEX;
+        } else if (freq > 160000000UL) {
+            response.status = STATUS_INVALID_VALUE;
+        } else {
+            beacon_config.output[output].frequency = freq;
+            printf("Setting f_%d to %ld Hz\n", output, freq);
+            response.status = STATUS_OK;
         }
 
-        usbMsgPtr = (void *) &response;
-        return sizeof(response);
+    } else if (rq->bRequest == REQ_SET_DRIVE) {
+        uint16_t output = rq->wIndex.word;
+        uint16_t drive = rq->wValue.word;
 
-    } else if (rq->bRequest == CTRL_SET_REGISTER) {
-        uint16_t address = rq->wIndex.word;
+        if (output >= CLK_OUTPUTS) {
+            response.status = STATUS_INVALID_INDEX;
+        } else if (drive & 0x01 || drive > 8) {
+            response.status = STATUS_INVALID_VALUE;
+        } else {
+            beacon_config.output[output].drive = drive;
+            printf("Setting drive strength of output %d to %d mA\n", output, drive);
+            response.status = STATUS_OK;
+
+            /* Write to the Si5351 */
+            si5351_drive_strength(output, (drive / 2) - 1);
+        }
+
+    } else if (rq->bRequest == REQ_SET_CALL) {
+        uint16_t index = rq->wIndex.word;
         uint16_t value = rq->wValue.word;
 
-        response.value = 0;
-        response.status = STATUS_ERROR;
-
-        switch (address) {
-            case REG_LED:
-                led_set(value);
-                response.value = !!value;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_FREQ_0:
-                clk_outputs[0].frequency &= 0xFFFF0000;
-                clk_outputs[0].frequency |= ((uint32_t)value << 0UL);
-                response.value = value;
-                response.status = STATUS_OK;
-                break;
-
-            case REG_CLK0_FREQ_1:
-                clk_outputs[0].frequency &= 0x0000FFFF;
-                clk_outputs[0].frequency |= ((uint32_t)value << 16UL);
-                si5351_set_freq(clk_outputs[0].frequency, SI5351_CLK0);
-                response.value = value;
-                response.status = STATUS_OK;
-                sprintf(strbuf, "Setting frequency to %ld Hz\n", clk_outputs[0].frequency);
-                uart_puts(strbuf);
-
-                break;
-
-            case REG_CLK0_ENABLE:
-                clk_outputs[0].enabled = !!value;
-                si5351_output_enable(SI5351_CLK0, !!value);
-                response.value = !!value;
-                response.status = STATUS_OK;
-
-                if (value)
-                    sprintf(strbuf, "Output enabled\n");
-                else
-                    sprintf(strbuf, "Output disabled\n");
-                uart_puts(strbuf);
-
-                break;
-
-            case REG_CLK0_DRIVE:
-                if (value > SI5351_DRIVE_8MA)
-                    break;
-                clk_outputs[0].drive = value;
-                si5351_drive_strength(SI5351_CLK0, value);
-                response.value = value;
-                response.status = STATUS_OK;
-
-                uint8_t strength = (value + 1) * 2;
-                sprintf(strbuf, "Setting drive strength to %d mA\n", strength);
-                uart_puts(strbuf);
-
-                break;
-
-            case REG_FREQ_CORR:
-                freq_corr = value;
-                si5351_set_correction(freq_corr);
-                response.value = freq_corr;
-                response.status = STATUS_OK;
-                sprintf(strbuf, "Setting frequency correction to %d ppm\n", freq_corr / 10);
-                uart_puts(strbuf);
-                break;
+        // TODO: Check value of character
+        if (index >= CALL_LENGTH) {
+            response.status = STATUS_INVALID_INDEX;
+        } else {
+            beacon_config.callsign[index] = value;
+            response.status = STATUS_OK;
+            printf("Setting callsign[%d] = '%c'\n", index, value);
         }
 
-        usbMsgPtr = (void *) &response;
-        return sizeof(response);
+    } else if (rq->bRequest == REQ_SET_FREQ_CORR) {
+        uint16_t index = rq->wIndex.word;
+        uint16_t value = rq->wValue.word;
+
+        int32_t pptm = ((uint32_t)index << 16) | value;
+        beacon_config.freq_corr = pptm;
+        response.status = STATUS_OK;
+
+        /* Write to the Si5351 */
+        si5351_set_correction(pptm);
+
+    } else if (rq->bRequest == REQ_START_TONE) {
+        uint16_t out = rq->wIndex.word;
+
+        if (out >= CLK_OUTPUTS) {
+            response.status = STATUS_INVALID_INDEX;
+        } else {
+            si5351_set_freq(beacon_config.output[out].frequency, out);
+            si5351_output_enable(out, true);
+            response.status = STATUS_OK;
+        }
+
+    } else if (rq->bRequest == REQ_STOP_TONE) {
+        uint16_t out = rq->wIndex.word;
+
+        if (out >= CLK_OUTPUTS) {
+            response.status = STATUS_INVALID_INDEX;
+        } else {
+            si5351_output_enable(out, false);
+            response.status = STATUS_OK;
+        }
     }
 
-    return 0;
+    usbMsgPtr = (void *) &response;
+    return sizeof(response);
 }
 
 
+static int uart_putchar(char c, FILE *stream) {
+    uart_putc(c);
+}
+
 int main(int argc, char **argv) {
     led_init();
-    uart_init(UART_BAUD_SELECT(115200, F_CPU));
 
-    i2c_init();
+    /* Initialize UART and redirect stdout */
+    uart_init(UART_BAUD_SELECT(115200, F_CPU));
+    static FILE mystdout = FDEV_SETUP_STREAM(uart_putchar, NULL, _FDEV_SETUP_WRITE);
+    stdout = &mystdout;
 
     /* Initialize the USB driver and force enumeration. */
     usbInit();
@@ -208,12 +199,14 @@ int main(int argc, char **argv) {
     _delay_ms(250);
     usbDeviceConnect();
 
-    uart_puts("WSPR Beacon by OE5TKM\n");
-
     sei();
 
+    /* Initialize I2C and the Si5251 module */
+    i2c_init();
     si5351_init(SI5351_CRYSTAL_LOAD_8PF, SI5351_CLK_SRC_XTAL);
     si5351_drive_strength(SI5351_CLK0, SI5351_DRIVE_2MA);
+
+    printf("WSPR Beacon by OE5TKM\n");
 
     while (1) {
         usbPoll();

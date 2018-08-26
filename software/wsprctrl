@@ -23,116 +23,124 @@ import argparse
 import struct
 import contextlib
 import datetime as dt
-import subprocess
+import enum
 
 import usb
 
-CTRL_GET_REGISTER = 0
-CTRL_SET_REGISTER = 1
-
-STATUS_OK = 0
-STATUS_ERROR = 1
-
-REG_LED = 0
-REG_FREQ_CORR = 1
-
-# Registers for CLK0 output
-REG_CLK0_FREQ_0 =  8
-REG_CLK0_FREQ_1 =  9
-REG_CLK0_ENABLE = 10
-REG_CLK0_DRIVE  = 11
+class Request(enum.IntEnum):
+    ENABLE_LED      = 0
+    DISABLE_LED     = 1
+    SET_FREQ        = 2
+    SET_DRIVE       = 3
+    SET_CALL        = 4
+    SET_FREQ_CORR   = 5
+    START_TONE      = 6
+    STOP_TONE       = 7
 
 
-class BeaconException(Exception):
+class Status(enum.IntEnum):
+    OK              = 0
+    GENERIC_ERROR   = 1
+    INVALID_REQUEST = 2
+    INVALID_INDEX   = 3
+    INVALID_VALUE   = 4
+
+
+class BeaconError(Exception):
     pass
-
-
-def get_devices():
-    device_filter = dict(
-        idVendor=0x16c0,
-        idProduct=0x05dc,
-        serial_number='oe5tkm.net:wspr-beacon'
-    )
-    return list(usb.core.find(**device_filter, find_all=True))
 
 
 class Beacon(object):
     def __init__(self, dev : usb.Device):
         self.dev = dev
 
-    def get_register(self, addr):
-        buf = self.dev.ctrl_transfer(0xC0, CTRL_GET_REGISTER, 0, addr, 4)
-        if len(buf) != 4:
-            raise BeaconException('Received response with wrong size')
+    @staticmethod
+    def get_devices():
+        device_filter = dict(
+            idVendor=0x16c0,
+            idProduct=0x05dc,
+            serial_number='oe5tkm.net:wspr-beacon'
+        )
+        return list(usb.core.find(**device_filter, find_all=True))
 
+    def generic_cmd(self, request, index, value):
+        buf = self.dev.ctrl_transfer(0xC0, request, value, index, 4)
         value, status = struct.unpack('HH', buf)
-        if status != STATUS_OK:
-            raise BeaconException('Received response with error code %d' % status)
+        return value, status
 
-        return value
+    def enable_led(self):
+        _, status = self.generic_cmd(Request.ENABLE_LED, 0, 0)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def disable_led(self):
+        _, status = self.generic_cmd(Request.DISABLE_LED, 0, 0)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def set_frequency(self, output, value):
+        # The output is passed in the upper 4 bits of the double word.
+        req_index = (output << 12) | (value >> 16)
+        req_value = value & 0xFFFF
+
+        assert 0 <= req_index < 2**16
+        assert 0 <= req_value < 2**16
+
+        _, status = self.generic_cmd(Request.SET_FREQ, req_index, req_value)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def set_drive_strength(self, output, value):
+        _, status = self.generic_cmd(Request.SET_DRIVE, output, value)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def set_callsign(self, call):
+        for i, c in enumerate(call):
+            _, status = self.generic_cmd(Request.SET_CALL, i, ord(c))
+            if status != Status.OK:
+                raise BeaconError('Returned status code %d' % status)
+
+    def set_freq_correction(self, ppm):
+        value = ctypes.c_uint32(round(ppm * 10))
+        req_index = value.value >> 16
+        req_value = value.value & 0xFFFF
+        _, status = self.generic_cmd(Request.SET_FREQ_CORR, req_index, req_value)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def start_tone(self, output):
+        _, status = self.generic_cmd(Request.START_TONE, output, 0)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
+
+    def stop_tone(self, output):
+        _, status = self.generic_cmd(Request.STOP_TONE, output, 0)
+        if status != Status.OK:
+            raise BeaconError('Returned status code %d' % status)
 
 
-    def set_register(self, addr, value):
-        buf = self.dev.ctrl_transfer(0xC0, CTRL_SET_REGISTER, value, addr, 4)
-        if len(buf) != 4:
-            raise BeaconException('Received response with wrong size')
-
-        value, status = struct.unpack('HH', buf)
-        if status != STATUS_OK:
-            raise BeaconException('Received response with error code %d' % status)
-
-        return value
-
-    def set_enable(self, enable):
-        """Enable/disable the frequency output."""
-        return self.set_register(REG_CLK0_ENABLE, bool(enable))
-
-    def set_frequency(self, freq):
-        self.set_register(REG_CLK0_FREQ_0, (freq >>  0) & 0xFFFF)
-        self.set_register(REG_CLK0_FREQ_1, (freq >> 16) & 0xFFFF)
-
-    def get_frequency(self):
-        f0 = self.get_register(REG_CLK0_FREQ_0)
-        f1 = self.get_register(REG_CLK0_FREQ_1)
-
-        return (f1 << 16) | f0
-
-    def set_drive_strength(self, drive_ma):
-        """Set the drive strength in mA."""
-        drive_index = drive_ma // 2 - 1
-        self.set_register(REG_CLK0_DRIVE, drive_index)
-
-    def set_freq_corr(self, ppm):
-        """Set the frequency correction factor."""
-        value = ctypes.c_uint16(round(ppm * 10)).value
-        self.set_register(REG_FREQ_CORR, value)
-
-    def get_freq_corr(self):
-        """Get the frequency correction factor."""
-        value = self.get_register(REG_FREQ_CORR)
-        return ctypes.c_int16(value).value
+def cmd_blink(beacon):
+    with contextlib.suppress(KeyboardInterrupt):
+        while True:
+            beacon.enable_led()
+            time.sleep(0.05)
+            beacon.disable_led()
+            time.sleep(0.95)
+    beacon.disable_led()
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--list', '-l', action='store_true',
                         help='show available devices')
-    parser.add_argument('--blink', '-b', action='store_true',
-                        help='blink LED')
     parser.add_argument('--device', '-d', type=int, default=0,
                         help='device index')
-    parser.add_argument('--message', '-m', type=str, default=None,
-                        help='message to transmit')
-    parser.add_argument('--test', '-t', action='store_true',
-                        help='transmit test tone')
-    parser.add_argument('--ppm', '-p', type=float, default=None,
-                        help='set frequency correction in PPM')
-    parser.add_argument('--frequency', '-f', type=int, default=None,
-                        help='transmit frequency')
-
+    parser.add_argument('--blink', '-b', action='store_true',
+                        help='continuously flash LED')
     args = parser.parse_args()
 
-    devices = get_devices()
+    devices = Beacon.get_devices()
     if len(devices) == 0:
         print('Error: no WSPR devices found', file=sys.stderr)
         return 1
@@ -151,72 +159,24 @@ def main():
     dev.set_configuration()
     beacon = Beacon(dev)
 
-
-    if args.ppm is not None:
-        beacon.set_freq_corr(args.ppm)
-
-
     if args.blink:
-        with contextlib.suppress(KeyboardInterrupt):
-            while True:
-                value = beacon.get_register(REG_LED)
-                beacon.set_register(REG_LED, not value)
-                time.sleep(0.1)
+        cmd_blink(beacon)
 
+    beacon.set_freq_correction(26)
 
-    elif args.message:
-        if args.frequency is None:
-            print('Frequency not set', file=sys.stderr)
-            return 1
+    beacon.set_frequency(0, 7039000)
+    #beacon.set_frequency(1, 7000000)
+    #beacon.set_frequency(2, 7000000)
 
-        result = subprocess.run(['./wsprcode', args.message], stdout=subprocess.PIPE)
-        output = result.stdout.split(b'\n')
-        i = output.index(b'Channel symbols:')
-        symbols = [int(x) for x in b' '.join(output[i+1:i+7]).split()]
+    beacon.set_drive_strength(0, 2)
+    #beacon.set_drive_strength(1, 4)
+    #beacon.set_drive_strength(2, 6)
 
-        # Get the time when the transmission starts
-        now = dt.datetime.now()
-        mdelta = dt.timedelta(minutes=(2 if (now.minute % 2 == 0) else 1))
-        start = now.replace(second=1, microsecond=0) + mdelta
+    beacon.set_callsign('OE5TKM')
 
-        print('Starting transmission at %s' % start.strftime('%H:%M'))
-
-        # Wait until the transmission starts
-        diff = (start - now).total_seconds()
-        time.sleep(diff)
-
-        try:
-            beacon.set_drive_strength(8)
-            beacon.set_enable(True)
-            for sym in symbols:
-                stop = dt.datetime.now() + dt.timedelta(seconds=0.682667)
-                f = 1.4648 * sym
-
-                beacon.set_frequency(args.frequency + round(f))
-
-                diff = (stop - dt.datetime.now()).total_seconds()
-                time.sleep(diff)
-
-        except KeyboardInterrupt:
-            pass
-        finally:
-            beacon.set_enable(False)
-
-
-    elif args.test:
-        if args.frequency is None:
-            print('Frequency not set', file=sys.stderr)
-            return 1
-
-        beacon.set_drive_strength(2)
-        beacon.set_frequency(args.frequency)
-        beacon.set_enable(True)
-
-        with contextlib.suppress(KeyboardInterrupt):
-            while True:
-                time.sleep(0.1)
-
-        beacon.set_enable(False)
+    beacon.start_tone(0)
+    time.sleep(1)
+    beacon.stop_tone(0)
 
 
 if __name__ == '__main__':
