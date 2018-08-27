@@ -19,6 +19,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "debug.h"
+
 
 const uint8_t sync_vector[] = {
     0x03, 0x71, 0xa4, 0x07, 0xa4, 0x40, 0xb3, 0x58, 0x58, 0x95, 0x34, 0x56,
@@ -42,8 +44,8 @@ static uint8_t get_parity(uint32_t shiftreg) {
     uint8_t par1 = 0;
 
     for (int k = 0; k < 32; k++) {
-        par0 ^= !!(tmp0 & (1 << k));
-        par1 ^= !!(tmp1 & (1 << k));
+        par0 ^= !!(tmp0 & (1UL << k));
+        par1 ^= !!(tmp1 & (1UL << k));
     }
     return (par1 << 1) | par0;
 }
@@ -68,6 +70,22 @@ static uint8_t bit_reverse(uint8_t byte) {
     }
     return result;
 }
+
+
+#ifdef DEBUG
+static void print_vector(const char *name, const uint8_t *bitvec) {
+    printf("%s:", name);
+    for (int i = 0; i < 162; i++) {
+        if (i % 30 == 0)
+            printf("\n      ");
+        printf("%d", get_bit(bitvec, i));
+
+        if (i % 30 != 29)
+            printf(" ");
+    }
+    printf("\n");
+}
+#endif
 
 
 /**
@@ -114,17 +132,17 @@ int wspr_encode(uint8_t *result, const char *call, const char *loc, int power) {
         uint8_t bit;
         if (i < 28) {
             uint8_t index = 27 - i;
-            bit = !!(call_enc & (1 << index));
+            bit = !!(call_enc & (1UL << index));
         } else {
             uint8_t index = 21 - (i - 28);
-            bit = !!(loc_pwr_enc & (1 << index));
+            bit = !!(loc_pwr_enc & (1UL << index));
         }
 
         shiftreg = (shiftreg << 1) | bit;
 
         uint32_t parity = get_parity(shiftreg);
-        uint8_t par0 = !!(parity & (1 << 0));
-        uint8_t par1 = !!(parity & (1 << 1));
+        uint8_t par0 = !!(parity & (1UL << 0));
+        uint8_t par1 = !!(parity & (1UL << 1));
 
         set_bit(packed, 2 * i, par0);
         set_bit(packed, 2 * i + 1, par1);
@@ -153,5 +171,16 @@ int wspr_encode(uint8_t *result, const char *call, const char *loc, int power) {
             break;
     }
 
+#ifdef DEBUG
+    print_vector("Data symbols", result);
+    printf("\n");
+    print_vector("Sync symbols", sync_vector);
+#endif
+
     return 0;
+}
+
+
+uint8_t wspr_get_tone(const uint8_t *enc, uint8_t index) {
+    return get_bit(sync_vector, index) + 2 * get_bit(enc, index);
 }

@@ -186,7 +186,7 @@ enum si5351_variant {
 };
 
 enum si5351_clock {
-    SI5351_CLK0,
+    SI5351_CLK0 = 0,
     SI5351_CLK1,
     SI5351_CLK2,
     SI5351_CLK3,
@@ -199,14 +199,14 @@ enum si5351_clock {
 enum si5351_pll { SI5351_PLLA, SI5351_PLLB };
 
 enum si5351_drive {
-    SI5351_DRIVE_2MA,
+    SI5351_DRIVE_2MA = 0,
     SI5351_DRIVE_4MA,
     SI5351_DRIVE_6MA,
     SI5351_DRIVE_8MA
 };
 
 enum si5351_clock_source {
-    SI5351_CLK_SRC_XTAL,
+    SI5351_CLK_SRC_XTAL = 0,
     SI5351_CLK_SRC_CLKIN,
     SI5351_CLK_SRC_MS0,
     SI5351_CLK_SRC_MS

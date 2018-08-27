@@ -109,8 +109,8 @@ class Beacon(object):
         if status != Status.OK:
             raise BeaconError('Returned status code %d' % status)
 
-    def start_tone(self, output):
-        _, status = self.generic_cmd(Request.START_TONE, output, 0)
+    def start_tone(self, output, msecs):
+        _, status = self.generic_cmd(Request.START_TONE, output, msecs)
         if status != Status.OK:
             raise BeaconError('Returned status code %d' % status)
 
@@ -138,6 +138,8 @@ def main():
                         help='device index')
     parser.add_argument('--blink', '-b', action='store_true',
                         help='continuously flash LED')
+    parser.add_argument('--tone', '-t', action='store_true',
+                        help='play a tone for 1 second')
     args = parser.parse_args()
 
     devices = Beacon.get_devices()
@@ -162,6 +164,9 @@ def main():
     if args.blink:
         cmd_blink(beacon)
 
+    elif args.tone:
+        cmd_tone(beacon)
+
     beacon.set_freq_correction(26)
 
     beacon.set_frequency(0, 7039000)
@@ -174,9 +179,7 @@ def main():
 
     beacon.set_callsign('OE5TKM')
 
-    beacon.start_tone(0)
-    time.sleep(1)
-    beacon.stop_tone(0)
+    beacon.start_tone(0, 1000)
 
 
 if __name__ == '__main__':

@@ -11,19 +11,23 @@ set(CMAKE_ASM_COMPILER avr-gcc)
 
 # Defines used in the project
 add_definitions(-D F_CPU=${F_CPU})
+add_definitions(-D DEBUG)
 
 # Remove the -rdynamic flag
 set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")
 
 # Set the compiler flags
-set(CMAKE_C_FLAGS "-mmcu=${MCU} -Os")
+set(CMAKE_C_FLAGS "-mmcu=${MCU} -Os -Wall")
 set(CMAKE_ASM_FLAGS ${CMAKE_C_FLAGS})
 
 
 add_executable(${PROJECT_NAME}
+    main.c
     beacon.c
+    beacon.h
     wspr.c
     wspr.h
+    debug.h
 
     # Internal hardware
     hal/i2c_master.c
