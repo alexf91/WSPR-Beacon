@@ -11,7 +11,14 @@ set(CMAKE_ASM_COMPILER avr-gcc)
 
 # Defines used in the project
 add_definitions(-D F_CPU=${F_CPU})
-add_definitions(-D DEBUG)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+if(${CMAKE_BUILD_TYPE} MATCHES "Debug")
+    add_definitions(-DDEBUG)
+endif()
 
 # Remove the -rdynamic flag
 set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")

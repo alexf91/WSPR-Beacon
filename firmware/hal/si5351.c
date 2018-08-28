@@ -198,7 +198,7 @@ void si5351_set_ms(enum si5351_clock clk, struct Si5351Frac frac,
     uint8_t params[20];
     uint8_t i = 0;
     uint8_t temp;
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
 
     // Calculate parameters
     if (div_by_4 == 1) {
@@ -284,7 +284,7 @@ void si5351_set_ms(enum si5351_clock clk, struct Si5351Frac frac,
  * enable - Set to 1 to enable, 0 to disable
  */
 void si5351_output_enable(enum si5351_clock clk, uint8_t enable) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
 
     if (si5351_read(SI5351_OUTPUT_ENABLE_CTRL, &reg_val) != 0) {
         return;
@@ -310,7 +310,7 @@ void si5351_output_enable(enum si5351_clock clk, uint8_t enable) {
  *   (use the si5351_drive enum)
  */
 void si5351_drive_strength(enum si5351_clock clk, enum si5351_drive drive) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     const uint8_t mask = 0x03;
 
     if (si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val) != 0) {
@@ -429,7 +429,7 @@ void si5351_pll_reset(enum si5351_pll target_pll) {
  * Set the desired PLL source for a multisynth.
  */
 void si5351_set_ms_source(enum si5351_clock clk, enum si5351_pll pll) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
 
     si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val);
 
@@ -452,7 +452,7 @@ void si5351_set_ms_source(enum si5351_clock clk, enum si5351_pll pll) {
  * Set the indicated multisynth into integer mode.
  */
 void si5351_set_int(enum si5351_clock clk, uint8_t enable) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val);
 
     if (enable == 1) {
@@ -475,7 +475,7 @@ void si5351_set_int(enum si5351_clock clk, uint8_t enable) {
  * saving feature).
  */
 void si5351_set_clock_pwr(enum si5351_clock clk, uint8_t pwr) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val);
 
     if (pwr == 1) {
@@ -497,7 +497,7 @@ void si5351_set_clock_pwr(enum si5351_clock clk, uint8_t pwr) {
  * Enable to invert the clock output waveform.
  */
 void si5351_set_clock_invert(enum si5351_clock clk, uint8_t inv) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val);
 
     if (inv == 1) {
@@ -524,7 +524,7 @@ void si5351_set_clock_invert(enum si5351_clock clk, uint8_t inv) {
  */
 void si5351_set_clock_source(enum si5351_clock clk,
                              enum si5351_clock_source src) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     si5351_read(SI5351_CLK0_CTRL + (uint8_t)clk, &reg_val);
 
     // Clear the bits first
@@ -569,7 +569,7 @@ void si5351_set_clock_source(enum si5351_clock clk,
  */
 void si5351_set_clock_disable(enum si5351_clock clk,
                               enum si5351_clock_disable dis_state) {
-    uint8_t reg_val, reg;
+    uint8_t reg_val = 0, reg = 0;
 
     if (clk >= SI5351_CLK0 && clk <= SI5351_CLK3) {
         reg = SI5351_CLK3_0_DISABLE_STATE;
@@ -604,7 +604,7 @@ void si5351_set_clock_disable(enum si5351_clock clk,
  * By default, only the Multisynth fanout is enabled at startup.
  */
 void si5351_set_clock_fanout(enum si5351_clock_fanout fanout, uint8_t enable) {
-    uint8_t reg_val;
+    uint8_t reg_val = 0;
     si5351_read(SI5351_FANOUT_ENABLE, &reg_val);
 
     switch (fanout) {
@@ -664,7 +664,7 @@ void si5351_update_int_status(struct Si5351IntStatus *int_status) {
 }
 
 void si5351_set_ms_div(enum si5351_clock clk, uint8_t r_div, uint8_t div_by_4) {
-    uint8_t reg_val, reg_addr = 0;
+    uint8_t reg_val = 0, reg_addr = 0;
 
     switch (clk) {
         case SI5351_CLK0:
