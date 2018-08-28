@@ -34,16 +34,10 @@ class Request(enum.IntEnum):
     SET_DRIVE       = 3
     SET_CALL        = 4
     SET_FREQ_CORR   = 5
-    START_TONE      = 6
-    STOP_TONE       = 7
-
-
-class Status(enum.IntEnum):
-    OK              = 0
-    GENERIC_ERROR   = 1
-    INVALID_REQUEST = 2
-    INVALID_INDEX   = 3
-    INVALID_VALUE   = 4
+    TRANSMIT_TONE   = 6
+    TRANSMIT_WSPR   = 7
+    SET_LAT         = 8
+    SET_LON         = 9
 
 
 class BeaconError(Exception):
@@ -70,12 +64,12 @@ class Beacon(object):
 
     def enable_led(self):
         _, status = self.generic_cmd(Request.ENABLE_LED, 0, 0)
-        if status != Status.OK:
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
     def disable_led(self):
         _, status = self.generic_cmd(Request.DISABLE_LED, 0, 0)
-        if status != Status.OK:
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
     def set_frequency(self, output, value):
@@ -87,18 +81,18 @@ class Beacon(object):
         assert 0 <= req_value < 2**16
 
         _, status = self.generic_cmd(Request.SET_FREQ, req_index, req_value)
-        if status != Status.OK:
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
     def set_drive_strength(self, output, value):
         _, status = self.generic_cmd(Request.SET_DRIVE, output, value)
-        if status != Status.OK:
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
     def set_callsign(self, call):
         for i, c in enumerate(call):
             _, status = self.generic_cmd(Request.SET_CALL, i, ord(c))
-            if status != Status.OK:
+            if status != 0:
                 raise BeaconError('Returned status code %d' % status)
 
     def set_freq_correction(self, ppm):
@@ -106,17 +100,33 @@ class Beacon(object):
         req_index = value.value >> 16
         req_value = value.value & 0xFFFF
         _, status = self.generic_cmd(Request.SET_FREQ_CORR, req_index, req_value)
-        if status != Status.OK:
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
-    def start_tone(self, output, msecs):
-        _, status = self.generic_cmd(Request.START_TONE, output, msecs)
-        if status != Status.OK:
+    def transmit_tone(self, output, msecs):
+        _, status = self.generic_cmd(Request.TRANSMIT_TONE, output, msecs)
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
-    def stop_tone(self, output):
-        _, status = self.generic_cmd(Request.STOP_TONE, output, 0)
-        if status != Status.OK:
+    def transmit_wspr(self, output):
+        _, status = self.generic_cmd(Request.TRANSMIT_WSPR, output, 0)
+        if status != 0:
+            raise BeaconError('Returned status code %d' % status)
+
+    def set_latitude(self, lat):
+        value = ctypes.c_uint32(round(lat * 2**16))
+        req_index = value.value >> 16
+        req_value = value.value & 0xFFFF
+        _, status = self.generic_cmd(Request.SET_LAT, req_index, req_value)
+        if status != 0:
+            raise BeaconError('Returned status code %d' % status)
+
+    def set_longitude(self, lon):
+        value = ctypes.c_uint32(round(lon * 2**16))
+        req_index = value.value >> 16
+        req_value = value.value & 0xFFFF
+        _, status = self.generic_cmd(Request.SET_LON, req_index, req_value)
+        if status != 0:
             raise BeaconError('Returned status code %d' % status)
 
 
@@ -140,6 +150,20 @@ def main():
                         help='continuously flash LED')
     parser.add_argument('--tone', '-t', action='store_true',
                         help='play a tone for 1 second')
+    parser.add_argument('--wspr', '-w', action='store_true',
+                        help='transmit WSPR message')
+    parser.add_argument('--output', '-o', type=int, default=0,
+            help='clock output')
+
+    parser.add_argument('--frequency', '-f', type=int, help='frequency')
+    parser.add_argument('--lat', type=float, help='latitude')
+    parser.add_argument('--lon', type=float, help='longitude')
+    parser.add_argument('--drive', type=int, help='drive strength')
+    parser.add_argument('--correction', type=float,
+            help='frequency correction in PPM')
+    parser.add_argument('--call', type=str, help='callsign in AABCCC format')
+
+
     args = parser.parse_args()
 
     devices = Beacon.get_devices()
@@ -161,25 +185,47 @@ def main():
     dev.set_configuration()
     beacon = Beacon(dev)
 
+    # Set the options
+
+    if args.frequency:
+        beacon.set_frequency(args.output, args.frequency)
+
+    if args.lat:
+        beacon.set_latitude(args.lat)
+
+    if args.lon:
+        beacon.set_longitude(args.lon)
+
+    if args.drive:
+        beacon.set_drive_strength(args.output, args.drive)
+
+    if args.correction:
+        beacon.set_freq_correction(args.correction)
+
+    if args.call:
+        beacon.set_callsign(args.call)
+
+
+    # Run a command
+
     if args.blink:
         cmd_blink(beacon)
 
     elif args.tone:
-        cmd_tone(beacon)
+        beacon.transmit_tone(args.output, 1000)
 
-    beacon.set_freq_correction(26)
+    elif args.wspr:
+        # Get the time when the transmission starts
+        now = dt.datetime.now()
+        mdelta = dt.timedelta(minutes=(2 if (now.minute % 2 == 0) else 1))
+        start = now.replace(second=1, microsecond=0) + mdelta
+        print('Starting transmission at %s' % start.strftime('%H:%M'))
 
-    beacon.set_frequency(0, 7039000)
-    #beacon.set_frequency(1, 7000000)
-    #beacon.set_frequency(2, 7000000)
+        # Wait until the transmission starts
+        diff = (start - now).total_seconds()
+        time.sleep(diff - 0.5)
 
-    beacon.set_drive_strength(0, 2)
-    #beacon.set_drive_strength(1, 4)
-    #beacon.set_drive_strength(2, 6)
-
-    beacon.set_callsign('OE5TKM')
-
-    beacon.start_tone(0, 1000)
+        beacon.transmit_wspr(args.output)
 
 
 if __name__ == '__main__':
