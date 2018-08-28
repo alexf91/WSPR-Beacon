@@ -61,6 +61,46 @@ static struct {
 } beacon_state[BEACON_CLK_OUTPUTS];
 
 
+/**
+ * @brief Convert GPS coordinates into the 6 character grid locator.
+ * @param grid Buffer for the result
+ * @param lon Longitude in 15.16 signed fixed point format.
+ * @param lat Latitude in 15.16 signed fixed point format.
+ * @returns 0 on uccess.
+ */
+static int8_t gps_to_grid(char *grid, int32_t lon, int32_t lat) {
+    const int32_t SCALE = 65536;
+
+    int32_t tmp_lon = lon + 180 * SCALE;
+    int32_t tmp_lat = lat +  90 * SCALE;
+
+    if (tmp_lon < 0 || tmp_lon > 360 * SCALE)
+        return 1;
+    if (tmp_lat < 0 || tmp_lat > 180 * SCALE)
+        return 2;
+
+    /* Convert the longitude */
+    grid[0] = tmp_lon / (20 * SCALE) + 'A';
+    tmp_lon %= (20 * SCALE);
+
+    grid[2] = tmp_lon / (2 * SCALE) + '0';
+    tmp_lon %= (2 * SCALE);
+
+    grid[4] = tmp_lon * 12 / SCALE + 'a';
+
+    /* Convert the latitude */
+    grid[1] = tmp_lat / (10 * SCALE) + 'A';
+    tmp_lat %= (10 * SCALE);
+
+    grid[3] = tmp_lat / SCALE + '0';
+    tmp_lat %= SCALE;
+
+    grid[5] = tmp_lat * 24 / SCALE + 'a';
+
+    return 0;
+}
+
+
 /* Counters used by the beacon state machine for measuring time. */
 static volatile uint32_t counter[BEACON_CLK_OUTPUTS] = {0};
 ISR(TIMER0_COMPA_vect) {
@@ -228,8 +268,14 @@ int8_t beacon_transmit_wspr(uint8_t out) {
     if (out >= BEACON_CLK_OUTPUTS)
         return 1;
 
-    if (wspr_encode(beacon_state[out].wspr_data, beacon_config.callsign, "JN68", 7)) {
+    char grid[7] = {0};
+    if (gps_to_grid(grid, beacon_config.lon, beacon_config.lat)) {
         return 2;
+    }
+    debug("Using grid %s\n", grid);
+
+    if (wspr_encode(beacon_state[out].wspr_data, beacon_config.callsign, grid, 7)) {
+        return 3;
     }
 
     beacon_state[out].mode = MODE_WSPR;

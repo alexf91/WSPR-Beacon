@@ -36,8 +36,10 @@ enum Request {
     REQ_SET_DRIVE,          /* Set drive strenght for an output */
     REQ_SET_CALL,           /* Set the callsign */
     REQ_SET_FREQ_CORR,      /* Set frequency correction value */
-    REQ_TRANSMIT_TONE,         /* Transmit a continuous tone */
-    REQ_TRANSMIT_WSPR,         /* Start a WSPR transmission */
+    REQ_TRANSMIT_TONE,      /* Transmit a continuous tone */
+    REQ_TRANSMIT_WSPR,      /* Start a WSPR transmission */
+    REQ_SET_LAT,            /* Set the latitude */
+    REQ_SET_LON,            /* Set the longitude */
 };
 
 
@@ -104,6 +106,22 @@ usbMsgLen_t usbFunctionSetup(uchar data[8]) {
     } else if (rq->bRequest == REQ_TRANSMIT_WSPR) {
         uint16_t out = rq->wIndex.word;
         response.status = beacon_transmit_wspr(out);
+
+    } else if (rq->bRequest == REQ_SET_LON) {
+        uint16_t req_index = rq->wIndex.word;
+        uint16_t req_value = rq->wValue.word;
+
+        uint32_t lon = ((uint32_t)req_index << 16) | req_value;
+
+        response.status = beacon_set_longitude(lon);
+
+    } else if (rq->bRequest == REQ_SET_LAT) {
+        uint16_t req_index = rq->wIndex.word;
+        uint16_t req_value = rq->wValue.word;
+
+        uint32_t lat = ((uint32_t)req_index << 16) | req_value;
+
+        response.status = beacon_set_latitude(lat);
     }
 
     usbMsgPtr = (void *) &response;
