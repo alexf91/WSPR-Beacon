@@ -32,22 +32,26 @@ const uint8_t sync_vector[] = {
  * Calculate the parity bits from the value of the shift register.
  * The parity bits are returned in bit0 and bit1 of the returned value.
  */
-static uint8_t get_parity(uint32_t shiftreg) {
-    const uint32_t poly0 = 0xF2D05351;
-    const uint32_t poly1 = 0xE4613C47;
+static uint8_t get_parity(uint32_t * shiftreg0, uint32_t * shiftreg1) {
+    // use Galois-type shift register calculation
+    // for this to work, polynomials have to be bit-reversed
+    const uint32_t rev_poly0 = 0x8ACA0B4E;  // invert lowest bit because it
+    const uint32_t rev_poly1 = 0xE23C8626;  // is set by having Data put there
 
-    uint32_t tmp0 = shiftreg & poly0;
-    uint32_t tmp1 = shiftreg & poly1;
+    uint8_t par0;
+    uint8_t par1;
 
-    /* TODO: Make this more efficient */
-    uint8_t par0 = 0;
-    uint8_t par1 = 0;
-
-    for (int k = 0; k < 32; k++) {
-        par0 ^= !!(tmp0 & (1UL << k));
-        par1 ^= !!(tmp1 & (1UL << k));
+    // if new data bit is 1, apply polynomial to SR
+    // new data bit is the same in both SRs, so we only need to test LSB once
+    if(*shiftreg0 & 1){
+        *shiftreg0 ^= rev_poly0;
+        *shiftreg1 ^= rev_poly1;
     }
-    return (par1 << 1) | par0;
+    // parity is at MSB
+    par0 = *shiftreg0 & 0x80000000 ? 1 : 0;
+    // implement shift in constant
+    par1 = *shiftreg1 & 0x80000000 ? 2 : 0;
+    return par1 | par0;
 }
 
 
@@ -125,7 +129,8 @@ int wspr_encode(uint8_t *result, const char *call, const char *loc, int power) {
     loc_pwr_enc = 128 * loc_pwr_enc + power + 64;
 
     /* Forward Error Correction */
-    uint32_t shiftreg = 0;
+    uint32_t shiftreg0 = 0;
+    uint32_t shiftreg1 = 0;
     uint8_t packed[21] = {0};
 
     for (int i = 0; i < 50; i++) {
@@ -138,9 +143,10 @@ int wspr_encode(uint8_t *result, const char *call, const char *loc, int power) {
             bit = !!(loc_pwr_enc & (1UL << index));
         }
 
-        shiftreg = (shiftreg << 1) | bit;
+        shiftreg0 = (shiftreg0 << 1) | bit;
+        shiftreg1 = (shiftreg1 << 1) | bit;
 
-        uint32_t parity = get_parity(shiftreg);
+        uint32_t parity = get_parity(&shiftreg0, &shiftreg1);
         uint8_t par0 = !!(parity & (1UL << 0));
         uint8_t par1 = !!(parity & (1UL << 1));
 
@@ -148,9 +154,10 @@ int wspr_encode(uint8_t *result, const char *call, const char *loc, int power) {
         set_bit(packed, 2 * i + 1, par1);
     }
     for (int i = 50; i < 81; i++) {
-        shiftreg = (shiftreg << 1);
+        shiftreg0 <<= 1;
+        shiftreg1 <<= 1;
 
-        uint32_t parity = get_parity(shiftreg);
+        uint32_t parity = get_parity(&shiftreg0, &shiftreg1);
         uint8_t par0 = !!(parity & (1 << 0));
         uint8_t par1 = !!(parity & (1 << 1));
 
