@@ -24,7 +24,7 @@ endif()
 set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")
 
 # Set the compiler flags
-set(CMAKE_C_FLAGS "-mmcu=${MCU} -Os -Wall")
+set(CMAKE_C_FLAGS "-mmcu=${MCU} -Os -Wall -std=c99")
 set(CMAKE_ASM_FLAGS ${CMAKE_C_FLAGS})
 
 
